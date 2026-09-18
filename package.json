@@ -1,6 +1,6 @@
 {
   "name": "voidsocket",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "High-throughput, zero-dependency WebSocket client for Node.js. Built for mission-critical ingestion pipelines, automated connection lifecycle, backpressure control, and zero-allocation stream parsing.",
   "type": "module",
   "main": "./index.mjs",
@@ -29,6 +29,10 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
-  }
+    "url": "git+https://github.com/v0idsociety/voidsocket.git"
+  },
+  "bugs": {
+    "url": "https://github.com/v0idsociety/voidsocket/issues"
+  },
+  "homepage": "https://github.com/v0idsociety/voidsocket#readme"
 }
