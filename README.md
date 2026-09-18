@@ -6,6 +6,7 @@ Ultra-high-throughput, zero-dependency WebSocket client for Node.js built direct
 
 ## Table of Contents
 
+- [What's New in v1.0.2 (Release Notes)](#whats-new-in-v102-release-notes)
 - [What's New in v1.0.1 (Release Notes)](#whats-new-in-v101-release-notes)
 - [Architectural Rationale](#architectural-rationale)
 - [Key Features](#key-features)
@@ -24,6 +25,7 @@ Ultra-high-throughput, zero-dependency WebSocket client for Node.js built direct
 - [Configuration Reference](#configuration-reference)
 - [API & Event Reference](#api--event-reference)
 - [Türkçe Dokümantasyon](#türkçe-dokümantasyon)
+  - [v1.0.2 Sürümünde Neler Değişti?](#v102-sürümünde-neler-değişti)
   - [v1.0.1 Sürümünde Neler Değişti?](#v101-sürümünde-neler-değişti)
   - [Mimari Tercihler ve Neden voidsocket?](#mimari-tercihler-ve-neden-voidsocket)
   - [3 Farklı Kullanım Modeli (VoidSocket, v0id, vd)](#3-farklı-kullanım-modeli-voidsocket-v0id-vd)
@@ -32,6 +34,12 @@ Ultra-high-throughput, zero-dependency WebSocket client for Node.js built direct
   - [Yapılandırma Seçenekleri](#yapılandırma-seçenekleri)
   - [Olay Yuvaları ve Metod Tablosu](#olay-yuvaları-ve-metod-tablosu)
 - [License](#license)
+
+---
+
+## What's New in v1.0.2 (Release Notes)
+
+* **GitHub Repository Link:** Added `repository`, `bugs`, and `homepage` fields to `package.json`, linking the npm package directly to the [GitHub repository](https://github.com/v0idsociety/voidsocket).
 
 ---
 
@@ -363,6 +371,12 @@ new VoidSocket(url | url[], options)
 ---
 
 ## Türkçe Dokümantasyon
+
+### v1.0.2 Sürümünde Neler Değişti?
+
+* **GitHub Repository Bağlantısı:** `package.json` dosyasına `repository`, `bugs` ve `homepage` alanları eklenerek npm paketi doğrudan [GitHub deposuna](https://github.com/v0idsociety/voidsocket) bağlandı.
+
+---
 
 ### v1.0.1 Sürümünde Neler Değişti?
 
