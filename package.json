@@ -1,7 +1,7 @@
 {
   "name": "voidsocket",
-  "version": "1.0.1",
-  "description": "High-throughput, zero-dependency WebSocket client for Node.js. Built for mission-critical ingestion pipelines, automated connection lifecycle, backpressure control, and zero-allocation stream parsing.",
+  "version": "1.0.3",
+  "description": "High-throughput, zero-dependency WebSocket client and server for Node.js. Built for mission-critical ingestion pipelines, broadcast engines, automated connection lifecycle, backpressure control, and zero-allocation stream parsing.",
   "type": "module",
   "main": "./index.mjs",
   "exports": {
@@ -9,14 +9,22 @@
   },
   "files": [
     "index.mjs",
+    "shared.mjs",
+    "socket.mjs",
+    "server.mjs",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {},
+  "scripts": {
+    "test": "node test/test.mjs"
+  },
   "keywords": [
     "websocket",
     "ws",
     "websocket-client",
+    "websocket-server",
+    "server",
+    "broadcast",
     "socket",
     "realtime",
     "tls",

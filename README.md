@@ -1,17 +1,17 @@
 # voidsocket
 
-Ultra-high-throughput, zero-dependency WebSocket client for Node.js built directly on native TLS/TCP sockets. Engineered for mission-critical streaming pipelines, financial market ingestion, automated connection resilience, kernel backpressure management, and zero-allocation frame parsing.
+Ultra-high-throughput, zero-dependency WebSocket client and server for Node.js built directly on native TLS/TCP sockets. Engineered for mission-critical streaming pipelines, financial market ingestion, automated connection resilience, kernel backpressure management, zero-copy broadcasting, and zero-allocation frame parsing.
 
 ---
 
 ## Table of Contents
 
-- [What's New in v1.0.1 (Release Notes)](#whats-new-in-v101-release-notes)
-- [Architectural Rationale](#architectural-rationale)
+- [What VoidSocket Handles Automatically](#what-voidsocket-handles-automatically)
 - [Key Features](#key-features)
 - [Installation](#installation)
 - [Three Ways to Use (VoidSocket, v0id, vd)](#three-ways-to-use-voidsocket-v0id-vd)
-- [Quick Start](#quick-start)
+- [Client Quick Start](#client-quick-start)
+- [Server Quick Start (VoidServer)](#server-quick-start-voidserver)
 - [Deep Dive & Production Recipes](#deep-dive--production-recipes)
   - [1. Zero-Copy Ingestion & Memory Semantics](#1-zero-copy-ingestion--memory-semantics)
   - [2. Multi-Endpoint Failover](#2-multi-endpoint-failover)
@@ -20,40 +20,56 @@ Ultra-high-throughput, zero-dependency WebSocket client for Node.js built direct
   - [5. Declarative Request-Response (ACK Engine)](#5-declarative-request-response-ack-engine)
   - [6. Cork / Uncork Frame Batching](#6-cork--uncork-frame-batching)
   - [7. Client-Side Rate Limiting](#7-client-side-rate-limiting)
-  - [8. Connection Telemetry & Health Metrics](#8-connection-telemetry--health-metrics)
+  - [8. Zero-Copy Multi-Client Broadcast](#8-zero-copy-multi-client-broadcast)
+  - [9. Connection Telemetry & Health Metrics](#9-connection-telemetry--health-metrics)
+  - [10. Low-Level Protocol Tools](#10-low-level-protocol-tools)
+  - [11. Hook System (beforeSend / afterRecv)](#11-hook-system-beforesend--afterrecv)
+  - [12. Event Binding (on / off / once)](#12-event-binding-on--off--once)
+  - [13. Socket Properties](#13-socket-properties)
+  - [14. Object Constructor](#14-object-constructor)
+  - [15. Ping / Pong Events](#15-ping--pong-events)
+  - [16. Express / HTTP Server Integration & Authentication](#16-express--http-server-integration--authentication)
+  - [17. Performance Benchmarks](#17-performance-benchmarks)
 - [Configuration Reference](#configuration-reference)
+- [Server Configuration Reference](#server-configuration-reference)
 - [API & Event Reference](#api--event-reference)
 - [Türkçe Dokümantasyon](#türkçe-dokümantasyon)
-  - [v1.0.1 Sürümünde Neler Değişti?](#v101-sürümünde-neler-değişti)
-  - [Mimari Tercihler ve Neden voidsocket?](#mimari-tercihler-ve-neden-voidsocket)
-  - [3 Farklı Kullanım Modeli (VoidSocket, v0id, vd)](#3-farklı-kullanım-modeli-voidsocket-v0id-vd)
+  - [VoidSocket'in Otomatik Hallettiği Şeyler](#voidsocketin-otomatik-hallettiği-şeyler)
+  - [İstemci ve Sunucu Kullanım Modelleri](#i̇stemci-ve-sunucu-kullanım-modelleri)
   - [Kurulum & İçe Aktarma](#kurulum--i̇çe-aktarma)
   - [Detaylı Kullanım Rehberi](#detaylı-kullanım-rehberi)
+  - [Sunucu Kullanım Rehberi (VoidServer)](#sunucu-kullanım-rehberi-voidserver)
   - [Yapılandırma Seçenekleri](#yapılandırma-seçenekleri)
   - [Olay Yuvaları ve Metod Tablosu](#olay-yuvaları-ve-metod-tablosu)
 - [License](#license)
 
 ---
 
-## What's New in v1.0.1 (Release Notes)
+## What VoidSocket Handles Automatically
 
-* **Signature `vd` Instance & Brand Shorthand:** Replaced generic `ws` variable references with our signature `vd` identifier (e.g., `vd.uncork()`, `vd.send()`, `vd.online`). This establishes a distinct identity unique to `voidsocket` and `v0idsociety`.
-* **Triple Identifier Support (`VoidSocket`, `v0id`, `vd`):** Users can import and instantiate using whichever alias best suits their codebase:
-  1. `VoidSocket` – Standard, explicit class name.
-  2. `v0id` – Brand identity representation of `v0idsociety`.
-  3. `vd` – High-speed, compact shorthand for minimal keystrokes.
-* **Streamlined Protocol Exports:** Legacy aliases (`Blitz`, `Xherz`, `BlitzSocket`) have been purged. Clean exports are provided for `VoidSocket`, `Void`, `v0id`, `vd`, alongside raw protocol utilities (`pack`, `packHeader`, `fastMask32`, `mask32`, `parseFrames`, `returnHeaderBuf`).
+The core purpose of `voidsocket` is to eliminate boilerplate. Here's everything it manages so you don't have to:
 
----
-
-## Architectural Rationale
-
-In 24/7 real-time streaming architectures (such as cryptocurrency orderbooks, market tickers, IoT telemetries, and event-driven trading bots), standard WebSocket abstractions often encounter severe operational limitations:
-
-1. **Garbage Collection (GC) Thrashing:** Traditional libraries allocate event wrapper objects, EventEmitter closures, and new `Buffer` instances for every single incoming message. Under ingestion rates of 50,000+ msgs/sec, the V8 garbage collector triggers frequent stop-the-world pauses (10ms–50ms), causing unacceptable latency spikes. `voidsocket` replaces event wrappers with direct monomorphic function slots (`recv`, `online`, `offline`) and yields direct zero-copy `Buffer.subarray` slices pointing into internal sliding ring buffers.
-2. **Buffer Bloat & Fatal OOM:** When upstream publishers broadcast faster than the consumer's downstream socket can transmit, in-flight buffers accumulate in process heap memory, inevitably crashing the Node.js process with Out-Of-Memory (OOM). `voidsocket` monitors OS kernel write buffer saturation and provides synchronous status indicators (`vd.saturated`) alongside asynchronous drain promises (`await vd.flush()`).
-3. **Silent Half-Open TCP Freezes:** Intermediate network hardware (NAT gateways, firewalls, cloud load balancers) routinely terminate idle TCP sessions without sending TCP `FIN` or `RST` packets. Conventional sockets stay hung forever without notifying application logic. `voidsocket` features automated RFC 6455 Ping/Pong heartbeats that verify socket responsiveness and autonomously cycle dead connections.
-4. **Application-Level Plumbing Overhead:** Reconnection loops, exponential backoff, jitter calculation, offline message spooling, and request-response ACK pairing typically demand hundreds of lines of boilerplate. `voidsocket` encapsulates these primitives natively with zero third-party dependencies.
+| What You'd Do Manually | What VoidSocket Does Instead |
+| :--- | :--- |
+| Write WebSocket frame parsing logic | **Zero-copy frame parser** — parses RFC 6455 frames automatically, `recv` gives you raw `Buffer` |
+| Implement XOR masking/unmasking | **Automatic mask negotiation** — client frames are masked, server frames are unmasked, you never touch a byte |
+| Handle HTTP 101 upgrade handshake | **Full handshake lifecycle** — sends the request, validates `Sec-WebSocket-Accept`, fires `online` when ready |
+| Write reconnection loops with backoff | **Self-healing reconnection** — exponential backoff + jitter, configurable delays and max attempts |
+| Detect zombie/dead TCP connections | **Ping/Pong heartbeat** — sends RFC 6455 pings at `pingInterval`, kills stale connections after `pingTimeout` |
+| Buffer messages during disconnects | **Offline egress queue** — `send()` before `online`? Messages are queued and auto-flushed on connect |
+| Monitor kernel write buffer saturation | **Backpressure detection** — `saturated` flag, `flushed` callback, `await vd.flush()` |
+| Frame multiple sends into one syscall | **Cork/Uncork batching** — `vd.cork()` + `vd.uncork()` = one kernel write for N frames |
+| Implement request-response correlation | **ACK engine** — `sendAck()` with matcher, timeout, and auto-retry built in |
+| Rotate through backup servers | **Multi-URL failover** — pass an array of URLs, it cycles through them automatically |
+| Enforce API rate limits | **Client-side rate limiter** — `{ count: 120, window: 60000 }` queues excess messages |
+| Parse incoming JSON manually | **Auto JSON mode** — `{ json: true }` parses inbound and stringifies outbound automatically |
+| Calculate payload sizes for frames | **Auto framing** — `send(string)` → text frame, `send(buffer)` → binary frame, `send(object)` + json → JSON text frame |
+| Manage connection state flags | **State management** — `isOpen`, `isClosed`, `saturated` always reflect real-time status |
+| Track message/byte statistics | **Built-in telemetry** — `vd.stats` gives `messagesIn/Out`, `bytesIn/Out`, `latency`, `uptime`, `reconnects` |
+| Transform data before send/after recv | **Hook system** — `beforeSend` and `afterRecv` interceptors at the protocol boundary |
+| Handle close handshakes gracefully | **RFC 6455 close** — `close(code)` sends proper close frames, `kill()` force-destroys |
+| Set up TCP keepalive + nagle | **Pre-configured** — `TCP_NODELAY`, `keepAlive: true`, `keepAliveInterval: 10s` all on by default |
+| Parse binary protocol headers | **Raw tools** — `pack()`, `parseFrames()`, `mask32()`, `fastMask32()` for custom protocol work |
 
 ---
 
@@ -106,11 +122,16 @@ In all code examples and production setups, the instance is referenced as `vd` (
 
 ## Import Options
 
-`voidsocket` provides clean ES module imports for client instantiation and low-level protocol tooling:
+`voidsocket` provides clean ES module imports for client and server instantiation alongside low-level protocol tooling:
 
 ```javascript
-// Primary client imports
+// Client imports
 import VoidSocket, { Void, v0id, vd } from 'voidsocket';
+
+// Server imports
+import { VoidServer, VoidSocketServer, v0idServer, vdServer, Server } from 'voidsocket';
+// Or as a static property:
+// const { Server } = VoidSocket;
 
 // Low-level protocol tools
 import {
@@ -125,7 +146,7 @@ import {
 
 ---
 
-## Quick Start
+## Client Quick Start
 
 ```javascript
 import VoidSocket from 'voidsocket';
@@ -158,6 +179,46 @@ vd.offline = (code) => {
 vd.error = (err) => {
     console.error('Socket error:', err.message);
 };
+```
+
+---
+
+## Server Quick Start (VoidServer)
+
+```javascript
+import { VoidServer } from 'voidsocket';
+
+// 1. Standalone High-Throughput Server
+const server = new VoidServer({ port: 8080 });
+
+server.listening = () => {
+    console.log('WebSocket server listening on port 8080');
+};
+
+server.connection = (vd, req) => {
+    console.log(`New client connected from ${vd.ip} (${req.url})`);
+
+    // Inbound zero-copy frames
+    vd.recv = (buf, op) => {
+        // Echo message back to client (unmasked server frame)
+        vd.send(`Echo: ${buf}`);
+    };
+
+    vd.offline = (code) => {
+        console.log(`Client ${vd.ip} disconnected (code: ${code})`);
+    };
+
+    vd.error = (err) => {
+        console.error(`Socket error from ${vd.ip}:`, err.message);
+    };
+};
+
+// 2. High-Speed Broadcast to all connected clients (Framed ONCE)
+setInterval(() => {
+    const tick = JSON.stringify({ time: Date.now(), price: 68420.50 });
+    const count = server.broadcast(tick);
+    console.log(`Broadcasted market tick to ${count} active clients`);
+}, 1000);
 ```
 
 ---
@@ -278,7 +339,19 @@ const vd = new VoidSocket('wss://api.exchange.com/v1', {
 });
 ```
 
-### 8. Connection Telemetry & Health Metrics
+### 8. Zero-Copy Multi-Client Broadcast
+
+In high-concurrency streaming servers, re-encoding and re-masking data for hundreds or thousands of connected sockets exhausts CPU cycles. Since RFC 6455 mandates that server-to-client frames remain unmasked, `VoidServer.broadcast` serializes and frames the payload **once**, writing the identical buffer slice to all matching client sockets:
+
+```javascript
+// Broadcasts to all active clients
+const totalSent = server.broadcast(JSON.stringify({ event: 'price_update', price: 95400 }));
+
+// Or apply a selective filter:
+server.broadcast(vipPayload, (client) => client.req.headers['x-tier'] === 'vip');
+```
+
+### 9. Connection Telemetry & Health Metrics
 
 Inspect live runtime statistics and round-trip ping-pong latency at any time:
 
@@ -299,9 +372,184 @@ console.log(vd.stats);
 */
 ```
 
+### 10. Low-Level Protocol Tools
+
+`voidsocket` exposes raw WebSocket frame primitives for custom protocol stacks, proxy servers, and testing:
+
+```javascript
+import { pack, packHeader, mask32, fastMask32, parseFrames, returnHeaderBuf } from 'voidsocket';
+
+// pack(op, data, mask, fast) - Create a complete WebSocket frame
+const textFrame = pack(1, 'Hello', true);       // Masked text frame
+const binaryFrame = pack(2, buffer, true);       // Masked binary frame
+const pongFrame = pack(10, Buffer.alloc(0), false); // Unmasked pong
+
+// parseFrames(buffer, onFrame) - Zero-copy streaming frame parser
+const payload = Buffer.alloc(1024);
+parseFrames(payload, (frame, opcode, fin) => {
+    // frame: Buffer.subarray view (zero-copy)
+    // opcode: 1=text, 2=binary, 8=close, 9=ping, 10=pong
+    // fin: boolean - is this the final fragment?
+});
+
+// mask32(buf, offset, length, maskKey) - XOR mask a payload in-place
+const maskKey = 0x12345678;
+mask32(payload, 0, payload.length, maskKey);
+
+// fastMask32() - Generate a 32-bit xorshift pseudo-random mask key
+const key = fastMask32(); // Returns signed 32-bit integer
+
+// packHeader(op, length, mask, fast) - Serialize only the frame header
+const { hdr, m32, hs } = packHeader(1, 100, true);
+// hdr: Buffer containing the frame header
+// m32: The mask key used
+// hs: Total header size in bytes
+returnHeaderBuf(hdr); // Return buffer to pool for reuse
+```
+
+### 11. Hook System (beforeSend / afterRecv)
+
+Intercept and transform data at the protocol boundary:
+
+```javascript
+// beforeSend: Called before every outbound frame. Return false to cancel.
+vd.beforeSend = (data) => {
+    if (typeof data === 'string') return data.toUpperCase(); // Transform
+    if (data === null) return false;                         // Block send
+    return data;                                             // Pass through
+};
+
+// afterRecv: Called on every inbound frame before recv. Return false to drop.
+vd.afterRecv = (buf, opcode) => {
+    const decoded = decompress(buf);
+    return decoded; // Return transformed buffer
+    // return false; // Drop the frame entirely
+};
+```
+
+### 12. Event Binding (on / off / once)
+
+For multiple listeners on the same event, use the EventEmitter-style API:
+
+```javascript
+const handler1 = (buf) => console.log('Handler 1');
+const handler2 = (buf) => console.log('Handler 2');
+
+vd.on('message', handler1);
+vd.on('message', handler2); // Both fire on each message
+
+vd.once('message', (buf) => {
+    console.log('Fires only once');
+});
+
+vd.off('message', handler1); // Remove handler1
+
+// Supported events: message, open/online, close/offline, error, ping, flushed/drain, reconnecting
+```
+
+### 13. Socket Properties
+
+Runtime access to internal state:
+
+```javascript
+vd.socket          // Underlying Node.js net/tls socket instance
+vd.bufferedAmount  // Bytes waiting in kernel write buffer
+vd.isServer        // true if this is a server-side connection
+vd.isOpen          // true if WebSocket handshake is complete
+vd.isClosed        // true if connection is closed
+vd.saturated       // true if write buffer exceeds highWaterMark
+vd.stats           // Live telemetry object (see section 9)
+```
+
+### 14. Object Constructor
+
+Pass options without a URL (useful for dynamic reconnection):
+
+```javascript
+const vd = new VoidSocket({
+    url: 'wss://feed.example.com',
+    reconnect: true,
+    json: true,
+    queue: true
+});
+```
+
+### 15. Ping / Pong Events
+
+Monitor heartbeat timing at the application level:
+
+```javascript
+vd.onPing = (payload) => {
+    console.log('Received ping, payload length:', payload.length);
+    // Auto-pong is sent before this fires (if autoPong: true)
+};
+
+vd.ping(Buffer.from('app-data'), (err) => {
+    if (!err) console.log('Ping sent');
+});
+
+vd.pong(Buffer.from('app-data')); // Manual pong response
+
+// Measure latency via stats
+console.log('Last RTT:', vd.stats.latency, 'ms');
+```
+
+### 16. Express / HTTP Server Integration & Authentication
+
+Attach `VoidServer` directly to an existing `http.Server` or use `handleUpgrade` with authentication:
+
+```javascript
+import http from 'node:http';
+import { VoidServer } from 'voidsocket';
+
+const httpServer = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('HTTP API Online');
+});
+
+const server = new VoidServer({
+    server: httpServer,
+    path: '/ws',
+    verifyClient: (info) => {
+        // Authenticate via token, cookie, or origin
+        const token = info.req.headers['authorization'];
+        return token === 'Bearer secret-token';
+    }
+});
+
+server.connection = (vd, req) => {
+    console.log('Authenticated client connected:', vd.ip);
+    vd.recv = (buf) => vd.send(`Echo: ${buf}`);
+};
+
+httpServer.listen(8080);
+```
+
+### 17. Performance Benchmarks
+
+Measured on Node.js v24 / Windows 11 / Intel Core i7:
+
+| Operation | Throughput |
+| :--- | :--- |
+| `pack()` (1 byte text frame) | ~4.6M frames/sec |
+| `pack()` (100 byte text frame) | ~2.5M frames/sec |
+| `parseFrames()` (7 bytes) | ~18M frames/sec |
+| `parseFrames()` (504 bytes) | ~24M frames/sec |
+| `mask32()` (64 bytes) | ~1.6 GB/sec XOR |
+| `mask32()` (65KB) | ~7.0 GB/sec XOR |
+| Echo round-trip (single client) | ~93K msgs/sec |
+| Broadcast (50 clients, 2000 msgs) | ~2K broadcasts/sec |
+| 1MB payload round-trip | Success |
+| 100 concurrent connections | All connected |
+| 500 rapid connect/disconnect | No memory leak |
+
+Zero-copy architecture eliminates per-message heap allocation. The `recv` callback delivers `Buffer.subarray` views directly into the internal ring buffer — no intermediate copies.
+
 ---
 
 ## Configuration Reference
+
+### Client Configuration (VoidSocket)
 
 ```javascript
 new VoidSocket(url | url[], options)
@@ -328,12 +576,45 @@ new VoidSocket(url | url[], options)
 | `fastMask` | `boolean` | `true` | Uses 32-bit xorshift PRNG for client frame masking. |
 | `autoPong` | `boolean` | `true` | Automatically responds to incoming server ping frames. |
 | `bufferSize` | `number` | `65536` | Baseline sliding ring buffer allocation size in bytes. |
+| `headers` | `object` | `null` | Custom HTTP headers to include in the upgrade handshake. |
+| `servername` | `string` | `url.hostname` | TLS server name for SNI. |
+
+---
+
+## Server Configuration Reference
+
+### Server Configuration (VoidServer)
+
+```javascript
+new VoidServer(options, [connectionListener])
+```
+
+| Option | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `port` | `number` | `null` | Port to listen on (automatically creates native HTTP or HTTPS server). |
+| `host` | `string` | `'0.0.0.0'` | Hostname or IP interface to bind server. |
+| `server` | `http.Server` | `null` | Attach to an existing Node.js HTTP or HTTPS server. |
+| `noServer` | `boolean` | `false` | Prevents server binding. Upgrades are handled manually via `server.handleUpgrade()`. |
+| `path` | `string` | `null` | Filters incoming upgrade requests by pathname (e.g. `'/ws'`). Rejects others. |
+| `tls` / `https` | `object` | `null` | TLS options (`{ cert, key }`) to spin up secure WSS server directly. |
+| `verifyClient` | `function` | `null` | Authentication hook: `(info) => boolean`, `(info, cb) => void`, or Promise. |
+| `selectProtocol` | `function` | `null` | Custom subprotocol negotiation: `(protocols, req) => string`. |
+| `maxConnections` | `number` | `Infinity` | Maximum concurrent connected WebSocket clients. Returns 503 if exceeded. |
+| `clientTracking` | `boolean` | `true` | Tracks all active connections in `server.clients` Set. |
+| `autoPing` | `boolean` | `true` | Automated per-client Ping heartbeats to recycle dead/frozen client connections. |
+| `pingInterval` | `number` | `30000` | Interval between server pings in milliseconds. |
+| `pingTimeout` | `number` | `10000` | Maximum duration to await pong before terminating client connection. |
+| `maxPayload` | `number` | `104857600` | Maximum inbound message size in bytes (100MB default). Closes with 1009 if exceeded. |
+| `maskRequired` | `boolean` | `true` | Strictly enforces RFC 6455 client masking. Rejects unmasked frames with code 1002. |
+| `headers` | `object \| fn` | `null` | Additional HTTP headers to include in the `101 Switching Protocols` handshake. |
 
 ---
 
 ## API & Event Reference
 
-### Event Slots
+### Client & Server Connection Event Slots
+
+Every connected socket (whether on the client or returned via `server.connection`) implements the signature monomorphic event slots:
 
 | Slot | Signature | Description |
 | :--- | :--- | :--- |
@@ -341,65 +622,79 @@ new VoidSocket(url | url[], options)
 | `vd.online` | `() => void` | Invoked when the WebSocket handshake successfully completes. |
 | `vd.offline` | `(code: number) => void` | Invoked when the socket disconnects. |
 | `vd.error` | `(err: Error) => void` | Invoked on network, protocol, or handshake errors. |
-| `vd.reconnecting` | `(attempt: number, delayMs: number) => void` | Invoked before initiating an auto-reconnect attempt. |
+| `vd.reconnecting` | `(attempt: number, delayMs: number) => void` | Invoked before initiating an auto-reconnect attempt (client-only). |
 | `vd.flushed` | `() => void` | Invoked when kernel socket backpressure drains completely. |
+| `vd.onPing` | `(payload: Buffer) => void` | Invoked when a ping frame is received (auto-pong fires first). |
+| `vd.beforeSend` | `(data: any) => any \| false` | Outbound data interceptor. Return `false` to cancel send. |
+| `vd.afterRecv` | `(buf: Buffer, op: number) => Buffer \| false` | Inbound frame interceptor. Return `false` to drop. |
+| `vd.req` | `http.IncomingMessage` | HTTP Upgrade request for server-side connections. |
+| `vd.ip` | `string` | Remote client IP address (`x-forwarded-for` or TCP socket remote). |
 
-### Methods
+### Socket Methods
 
 | Method | Description |
 | :--- | :--- |
-| `vd.send(data)` | Frame, mask, and send text, Buffer, or object data. |
+| `vd.send(data)` | Frame and send text, Buffer, or object data (masked for client, unmasked for server). |
 | `vd.json(obj)` | Serialize object to JSON and transmit as text frame. |
 | `vd.raw(buffer)` | Direct-write an already framed buffer straight to the socket. |
 | `vd.sendAck(data, matcher, opts)` | Send message and resolve on matching response with retry/timeout. |
 | `vd.expectAck(matcher, timeout)` | Wait for an incoming frame matching criteria (e.g. heartbeat detection). |
+| `vd.ping([payload], [cb])` | Send a WebSocket ping frame. Client frames are masked; server frames are unmasked. |
+| `vd.pong([payload], [cb])` | Send a WebSocket pong frame manually (auto-pong is separate). |
 | `vd.flush()` | Returns a Promise that resolves when write buffer drains. |
 | `vd.cork()` | Temporarily buffers outgoing writes. |
 | `vd.uncork()` | Flushes all corked frames in a single socket write. |
-| `vd.reconnect()` | Manually recycles the current socket and triggers reconnection. |
-| `vd.close(code)` | Gracefully closes the connection with an RFC 6455 close frame (Opcode 8). |
+| `vd.reconnect()` | Manually recycles the current socket and triggers reconnection (client-only). |
+| `vd.close([code])` | Gracefully closes the connection with an RFC 6455 close frame (Opcode 8). |
 | `vd.kill()` | Instantly destroys socket, timers, and disables auto-reconnection. |
+| `vd.on(event, fn)` | Add event listener. Supported: `message`, `open`/`online`, `close`/`offline`, `error`, `ping`, `flushed`/`drain`, `reconnecting`. |
+| `vd.off(event, fn)` | Remove event listener. |
+| `vd.once(event, fn)` | Add one-time event listener. |
 
----
+### Socket Properties
 
-## Türkçe Dokümantasyon
+| Property | Type | Description |
+| :--- | :--- | :--- |
+| `vd.socket` | `net.Socket \| tls.TLSSocket` | Underlying Node.js socket instance. |
+| `vd.bufferedAmount` | `number` | Bytes pending in the kernel write buffer (`socket.writableLength`). |
+| `vd.isServer` | `boolean` | `true` if this is a server-side connection. |
+| `vd.isOpen` | `boolean` | `true` if WebSocket handshake is complete and socket is active. |
+| `vd.isClosed` | `boolean` | `true` if the connection has been closed. |
+| `vd.saturated` | `boolean` | `true` if write buffer exceeds highWaterMark (backpressure active). |
+| `vd.stats` | `object` | Live telemetry: `{ messagesIn, messagesOut, bytesIn, bytesOut, latency, uptime, reconnects, queueSize, saturated }`. |
 
-### v1.0.1 Sürümünde Neler Değişti?
+### Server Event Slots & Methods (VoidServer)
 
-* **Bize Özgü `vd` Nesne İsmi:** Standart ve jenerik `ws` değişkeni yerine, `v0idsociety` ve `voidsocket` kimliğimizi temsil eden **`vd`** kullanımına geçildi (`vd.uncork()`, `vd.send()`, `vd.online`).
-* **3 Farklı İçe Aktarma ve Kullanım Modeli (`VoidSocket`, `v0id`, `vd`):** Kullanıcıların projelerinde istedikleri ismi kullanabilmesi için kütüphaneye 3 farklı alias eklendi.
-* **Protokol Export Temizliği:** Eski `Blitz`, `Xherz`, `BlitzSocket` kalıntıları tamamen temizlendi; `VoidSocket`, `v0id`, `vd` ve düşük seviyeli araçlar (`pack`, `fastMask32`, `mask32` vb.) doğrudan export edildi.
+| Member | Signature / Type | Description |
+| :--- | :--- | :--- |
+| `server.connection` | `(client: VoidSocket, req: IncomingMessage) => void` | Invoked when a new client completes the WebSocket upgrade handshake. |
+| `server.listening` | `() => void` | Invoked when the underlying HTTP/HTTPS server starts listening. |
+| `server.onClose` | `() => void` | Invoked when the server stops accepting connections and closes. |
+| `server.error` | `(err: Error) => void` | Invoked on server network or binding errors. |
+| `server.clients` | `Set<VoidSocket>` | Set of all currently active connected client instances. |
+| `server.broadcast(data[, filter])` | `(data: any, filter?: fn) => number` | Zero-copy broadcasts payload to all (or filtered) clients. Frames ONCE. Returns count. |
+| `server.address()` | `() => object \| string \| null` | Returns bound IP/port information from underlying server. |
+| `server.close([callback])` | `(cb?: fn) => void` | Gracefully closes all client connections with 1001 and terminates HTTP server. |
+| `server.handleUpgrade(req, sock, head, cb)` | `(req, sock, head, cb) => void` | Manually handles HTTP 101 upgrade on custom routers. |
 
----
+### İstemci ve Sunucu Kullanım Modelleri
 
-### Mimari Tercihler ve Neden voidsocket?
-
-`voidsocket`, Node.js üzerinde 7/24 kesintisiz çalışması gereken, yüksek hacimli veri akışlarını tüketen sistemler için tasarlanmış, sıfır bağımlılıklı bir WebSocket istemcisidir. Kripto para ve borsa emir defteri (orderbook) beslemeleri, gerçek zamanlı telemetri sistemleri, IoT veri toplama ağ geçitleri ve olay tabanlı bot servislerinde karşılaşılan operasyonel darboğazları çözmek üzere geliştirilmiştir.
-
-#### Çözülen Temel Problemler:
-1. **Çöp Toplayıcı (GC) Baskısı ve Gecikme Dalgalanmaları:** Standart kütüphaneler her gelen mesaj için yeni olay nesneleri, EventEmitter fonksiyon sarmalayıcıları ve ara tampon kopyaları oluşturur. Saniyede on binlerce mesaj akan bir sistemde bu durum V8 çöp toplayıcısını yorar ve 10ms–50ms arası ani gecikme sıçramalarına yol açar. `voidsocket`, doğrudan tekil özellik yuvaları (`vd.recv`, `vd.online`, `vd.offline`) üzerinden çağrı yapar ve gelen veriyi doğrudan dahili tampon üzerinden `Buffer.subarray` dilimiyle sıfır bellek kopyalaması ile iletir.
-2. **Kontrolsüz Bellek Büyümesi (Buffer Bloat / OOM):** Ağ çıkış hızından daha yüksek hızda veri yazılmaya çalışıldığında soket belleğinde kuyruklar birikir ve süreç bellek tükenmesiyle (`Out of Memory`) çöker. `voidsocket`, `vd.saturated`, `vd.flushed` ve `await vd.flush()` mekanizmalarıyla çekirdek tampon doluluğunu anlık izlemenize imkan tanır.
-3. **Donmuş (Zombi) Bağlantılar:** Güvenlik duvarları, NAT tabloları veya bulut yük dengeleyiciler bazen `FIN/RST` paketi göndermeden TCP bağlantısını kesebilir (half-open TCP). Standart soketler bu durumu fark edemez ve saatlerce asılı kalır. `voidsocket`, arka planda düzenli WebSocket Ping/Pong çerçeveleri gönderir; `pingTimeout` süresinde yanıt gelmezse soketi otomatik geri dönüştürerek yeniden bağlanır.
-4. **Kod Hamallığı:** Yeniden bağlanma (exponential backoff ve jitter), istek-cevap eşleştirme (ACK/timeout/retry), yedek sunucu geçişi ve bağlantı kopukken mesajların kaybolmaması gibi işlevler kütüphane içinde yerleşik olarak sunulur.
-
----
-
-### 3 Farklı Kullanım Modeli (VoidSocket, v0id, vd)
-
-`voidsocket`, hem okunabilirlik hem de geliştirici alışkanlıklarına uyum sağlamak için 3 farklı isim desteği sunar:
+`voidsocket`, hem okunabilirlik hem de geliştirici alışkanlıklarına uyum sağlamak için zengin isim desteği sunar:
 
 ```javascript
-// 1. Standart OOP Modeli
-import VoidSocket from 'voidsocket';
-const vd = new VoidSocket('wss://feed.example.com');
+// İstemci Modelleri
+import VoidSocket, { v0id, vd } from 'voidsocket';
+const client1 = new VoidSocket('wss://feed.example.com');
+const client2 = new v0id('wss://feed.example.com');
+const client3 = new vd('wss://feed.example.com');
 
-// 2. v0idsociety Ekip Kimliği Modeli
-import { v0id } from 'voidsocket';
-const vd = new v0id('wss://feed.example.com');
-
-// 3. Kısa ve Hızlı Kodlama Modeli
-import { vd as Socket } from 'voidsocket';
-const vd = new Socket('wss://feed.example.com');
+// Sunucu Modelleri
+import { VoidServer, v0idServer, vdServer, Server } from 'voidsocket';
+const server1 = new VoidServer({ port: 8080 });
+const server2 = new v0idServer({ port: 8080 });
+const server3 = new vdServer({ port: 8080 });
+// Veya VoidSocket.Server üzerinden:
+// const server = new VoidSocket.Server({ port: 8080 });
 ```
 
 Dokümantasyondaki tüm örneklerde nesne değişkeni olarak `vd` kullanılır (`vd.send()`, `vd.uncork()`).
@@ -415,8 +710,11 @@ npm install voidsocket
 #### İçe Aktarma Seçenekleri (ESM)
 
 ```javascript
-// Ana istemci sınıfları
+// İstemci sınıfları
 import VoidSocket, { Void, v0id, vd } from 'voidsocket';
+
+// Sunucu sınıfları
+import { VoidServer, VoidSocketServer, v0idServer, vdServer, Server } from 'voidsocket';
 
 // Düşük seviyeli protokol araçları
 import {
@@ -603,7 +901,76 @@ console.log(vd.stats);
 
 ---
 
-### Yapılandırma Seçenekleri
+### Sunucu Kullanım Rehberi (VoidServer)
+
+#### 1. Temel Echo Sunucusu ve İstemci Takibi
+
+```javascript
+import { VoidServer } from 'voidsocket';
+
+const server = new VoidServer({ port: 8080 });
+
+server.listening = () => {
+    console.log('VoidServer 8080 portunda dinlemede');
+};
+
+server.connection = (vd, req) => {
+    console.log(`Yeni istemci bağlandı: ${vd.ip} (${req.url})`);
+
+    vd.recv = (buf, op) => {
+        // İstemciye maskesiz sunucu çerçevesi olarak yankıla
+        vd.send(`Echo: ${buf}`);
+    };
+
+    vd.offline = (kod) => {
+        console.log(`İstemci ayrıldı: ${vd.ip}, kod: ${kod}`);
+    };
+};
+```
+
+#### 2. Sıfır Kopyalama Çoklu Yayın (`broadcast`)
+
+Binlerce istemciye aynı piyasa fiyatını veya bildirimi gönderirken her soket için tekrar serialize ve maskeleme maliyeti oluşmaz. Mesaj **bir kez** paketlenir ve tüm bağlı istemcilere doğrudan yazılır:
+
+```javascript
+// Tüm bağlı istemcilere anlık yayın
+const gonderilen = server.broadcast(JSON.stringify({ event: 'fiyat', btc: 95400 }));
+console.log(`${gonderilen} istemciye piyasa verisi iletildi`);
+
+// Ya da özel bir filtre uygulayarak gönderin:
+server.broadcast(vipVeri, (client) => client.req.headers['x-tier'] === 'vip');
+```
+
+#### 3. Express / HTTP Sunucusu Entegrasyonu ve Yetkilendirme (`verifyClient`)
+
+```javascript
+import http from 'node:http';
+import { VoidServer } from 'voidsocket';
+
+const httpServer = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end('Web API Calisiyor');
+});
+
+const server = new VoidServer({
+    server: httpServer,
+    path: '/ws',
+    verifyClient: (info) => {
+        // Token veya cookie kontrolü
+        return info.req.headers['authorization'] === 'Bearer gizli-anahtar';
+    }
+});
+
+server.connection = (vd, req) => {
+    console.log('Yetkili istemci baglandi:', vd.ip);
+};
+
+httpServer.listen(8080);
+```
+
+---
+
+### İstemci Yapılandırma Seçenekleri (VoidSocket)
 
 | Seçenek | Tür | Varsayılan | Açıklama |
 | :--- | :--- | :--- | :--- |
@@ -621,31 +988,125 @@ console.log(vd.stats);
 | `handshakeTimeout` | `number` | `5000` | HTTP 101 WebSocket el sıkışması zaman aşımı (ms). |
 | `noDelay` | `boolean` | `true` | Nagle algoritmasını devre dışı bırakır (`TCP_NODELAY`). |
 | `keepAlive` | `boolean` | `true` | İşletim sistemi seviyesinde TCP keep-alive paketlerini açar. |
+| `keepAliveInterval` | `number` | `10000` | TCP keep-alive prob aralığı (milisaniye). |
+| `maxSendFragment` | `number` | `2048` | TLS maksimum gönderim fragmanı boyutu (bayt). |
+| `fastMask` | `boolean` | `true` | İstemci çerçeve maskelemesi için 32-bit xorshift PRNG kullanır. |
+| `autoPong` | `boolean` | `true` | Gelen ping çerçevelerine otomatik pong yanıtı gönderir. |
 | `bufferSize` | `number` | `65536` | Dahili kayan halka tamponun temel başlangıç boyutu (bayt). |
+| `headers` | `object` | `null` | El sıkışma isteğine eklenecek özel HTTP başlıkları. |
+| `servername` | `string` | `url.hostname` | TLS SNI için sunucu adı. |
+
+---
+
+### Sunucu Yapılandırma Seçenekleri (VoidServer)
+
+| Seçenek | Tür | Varsayılan | Açıklama |
+| :--- | :--- | :--- | :--- |
+| `port` | `number` | `null` | Dinlenecek port (otomatik yerel HTTP/HTTPS sunucusu açar). |
+| `host` | `string` | `'0.0.0.0'` | Bağlanılacak ağ arayüzü veya IP adresi. |
+| `server` | `http.Server` | `null` | Mevcut bir Node.js HTTP veya HTTPS sunucusuna bağlanır. |
+| `noServer` | `boolean` | `false` | Port dinlemez; `server.handleUpgrade()` ile manuel el sıkışma yapılır. |
+| `path` | `string` | `null` | Sadece belirtilen yola (örn: `'/ws'`) gelen yükseltme isteklerini kabul eder. |
+| `tls` / `https` | `object` | `null` | Güvenli WSS sunucusu başlatmak için sertifika ayarları (`{ cert, key }`). |
+| `verifyClient` | `function` | `null` | Bağlantı doğrulama kancası: `(info) => boolean`, callback veya Promise. |
+| `selectProtocol` | `function` | `null` | İstemci subprotocol seçim fonksiyonu: `(protocols, req) => string`. |
+| `maxConnections` | `number` | `Infinity` | Eşzamanlı izin verilen maksimum bağlantı sayısı. Aşılırsa 503 döner. |
+| `clientTracking` | `boolean` | `true` | Bağlı tüm istemcileri `server.clients` Set koleksiyonunda izler. |
+| `autoPing` | `boolean` | `true` | Bağlı istemcilere düzenli ping atarak zombi bağlantıları kapatır. |
+| `pingInterval` | `number` | `30000` | Sunucu ping gönderme aralığı (milisaniye). |
+| `pingTimeout` | `number` | `10000` | Pong yanıtı gelmediğinde istemcinin kapatılacağı süre sınırı. |
+| `maxPayload` | `number` | `104857600` | Maksimum gelen paket boyutu bayt (varsayılan 100MB). Aşılırsa 1009 ile kapatılır. |
+| `maskRequired` | `boolean` | `true` | RFC 6455 istemci maskeleme kuralını zorunlu tutar. Maskesiz veriler 1002 ile reddedilir. |
+| `headers` | `object \| fn` | `null` | `101 Switching Protocols` el sıkışmasına eklenecek ek HTTP başlıkları. |
+
+---
+
+### Performans Ölçümleri
+
+Node.js v24 / Windows 11 ortamında ölçülen değerler:
+
+| İşlem | Hız |
+| :--- | :--- |
+| `pack()` (1 bayt metin çerçevesi) | ~4.6M çerçeve/sn |
+| `pack()` (100 bayt metin çerçevesi) | ~2.5M çerçeve/sn |
+| `parseFrames()` (7 bayt) | ~18M çerçeve/sn |
+| `parseFrames()` (504 bayt) | ~24M çerçeve/sn |
+| `mask32()` (64 bayt) | ~1.6 GB/sn XOR |
+| `mask32()` (65KB) | ~7.0 GB/sn XOR |
+| Echo round-trip (tek istemci) | ~93K mesaj/sn |
+| Broadcast (50 istemci, 2000 mesaj) | ~2K yayın/sn |
+| 1MB payload round-trip | Başarılı |
+| 100 eşzamanlı bağlantı | Tümü bağlandı |
+| 500 hızlı bağlan/ayrıl | Bellek sızıntısı yok |
+
+Sıfır kopyalama mimarisi sayesinde her mesaj için bellek ayırma maliyeti oluşmaz. `recv` callback'i dahili halka tamponu üzerindeki `Buffer.subarray` dilimlerini doğrudan iletir — ara kopyalama yoktur.
 
 ---
 
 ### Olay Yuvaları ve Metod Tablosu
 
-| Olay / Metod | Açıklama |
+#### Soket Seviyesi (İstemci ve Sunucu Bağlantıları) — Olay Yuvaları
+
+| Olay / Yuva | Açıklama |
 | :--- | :--- |
 | `vd.recv = (buf, op) => {}` | Gelen mesajları sıfır kopyalama Buffer dilimi olarak teslim alır. |
 | `vd.online = () => {}` | HTTP 101 WebSocket el sıkışması tamamlandığında tetiklenir. |
-| `vd.reconnecting = (deneme, gecikme) => {}` | Yeniden bağlanma girişiminden önce tetiklenir. |
+| `vd.reconnecting = (deneme, gecikme) => {}` | Yeniden bağlanma girişiminden önce tetiklenir (yalnızca istemci). |
 | `vd.flushed = () => {}` | Soket yazma tamponu boşaldığında tetiklenir. |
 | `vd.offline = (kod) => {}` | Bağlantı kapandığında tetiklenir. |
 | `vd.error = (hata) => {}` | Ağ veya protokol hatalarında tetiklenir. |
-| `vd.send(veri)` | Metin, Buffer veya nesneyi çerçeveleyip maskeleyerek gönderir. |
+| `vd.onPing = (buf) => {}` | Ping çerçevesi alındığında tetiklenir (otomatik pong zaten gönderilir). |
+| `vd.beforeSend = (veri) => veri` | Gönderim öncesi veri dönüştürücüsü. `false` dönerse gönderim iptal. |
+| `vd.afterRecv = (buf, op) => buf` | Alım sonrası çerçeve dönüştürücüsü. `false` dönerse çerçeve düşürülür. |
+| `vd.req` | Sunucu tarafındaki bağlantılarda gelen HTTP Upgrade isteği (`IncomingMessage`). |
+| `vd.ip` | İstemcinin uzak IP adresi (`x-forwarded-for` veya TCP soket IP). |
+
+#### Soket Seviyesi — Metotlar
+
+| Metot | Açıklama |
+| :--- | :--- |
+| `vd.send(veri)` | Metin, Buffer veya nesneyi çerçeveleyip gönderir (istemcide maskeli, sunucuda maskesiz). |
 | `vd.json(nesne)` | JavaScript nesnesini JSON metin çerçevesi olarak gönderir. |
 | `vd.raw(tampon)` | Önceden hazırlanmış çerçeveyi doğrudan sokete yazar. |
 | `vd.sendAck(veri, matcher[, opts])` | Veriyi gönderir, cevabı bekler; zaman aşımında otomatik tekrar dener. |
 | `vd.expectAck(matcher[, timeout])` | Belirtilen kalıpta bir gelen paketi bekler. |
+| `vd.ping([payload][, cb])` | Ping çerçevesi gönderir. İstemci çerçeveleri maskelidir, sunucu maskesiz. |
+| `vd.pong([payload][, cb])` | Manuel pong çerçevesi gönderir. |
 | `vd.flush()` | Soket yazma tamponu tamamen boşalana kadar bekleyen Promise döner. |
 | `vd.cork()` | Soket yazımlarını geçici olarak biriktirir. |
 | `vd.uncork()` | Biriktirilen tüm çerçeveleri tek soket çağrısında gönderir. |
-| `vd.reconnect()` | Mevcut bağlantıyı temizleyip sıfırdan yeniden bağlanma başlatır. |
+| `vd.reconnect()` | Mevcut bağlantıyı temizleyip sıfırdan yeniden bağlanma başlatır (istemci). |
 | `vd.close([kod])` | Standart WebSocket kapanış çerçevesiyle (Opcode 8) bağlantıyı kapatır. |
 | `vd.kill()` | Soketi, zamanlayıcıları ve otomatik yeniden bağlanmayı tamamen kapatır. |
+| `vd.on(olay, fn)` | Olay dinleyicisi ekler. Desteklenen: `message`, `open`/`online`, `close`/`offline`, `error`, `ping`, `flushed`/`drain`, `reconnecting`. |
+| `vd.off(olay, fn)` | Olay dinleyicisini kaldırır. |
+| `vd.once(olay, fn)` | Tek seferlik olay dinleyicisi ekler. |
+
+#### Soket Seviyesi — Özellikler
+
+| Özellik | Tür | Açıklama |
+| :--- | :--- | :--- |
+| `vd.socket` | `net.Socket \| tls.TLSSocket` | Altta yatan Node.js soket örneği. |
+| `vd.bufferedAmount` | `number` | Çekirdek yazma tamponundaki beklemedeki bayt sayısı. |
+| `vd.isServer` | `boolean` | Sunucu tarafı bağlantısıysa `true`. |
+| `vd.isOpen` | `boolean` | WebSocket el sıkışması tamamlandıysa `true`. |
+| `vd.isClosed` | `boolean` | Bağlantı kapatıldıysa `true`. |
+| `vd.saturated` | `boolean` | Yazma tamponu highWaterMark'ı aştıysa `true` (backpressure aktif). |
+| `vd.stats` | `object` | Canlı telemetri: `{ messagesIn, messagesOut, bytesIn, bytesOut, latency, uptime, reconnects, queueSize, saturated }`. |
+
+#### Sunucu Seviyesi (VoidServer)
+
+| Olay / Metod | Açıklama |
+| :--- | :--- |
+| `server.connection = (client, req) => {}` | Yeni bir istemci el sıkışmayı tamamladığında tetiklenir. |
+| `server.listening = () => {}` | Altta yatan HTTP/HTTPS sunucusu portu dinlemeye başladığında tetiklenir. |
+| `server.onClose = () => {}` | Sunucu kapandığında tetiklenir. |
+| `server.error = (hata) => {}` | Sunucu ağ veya port bağlama hatalarında tetiklenir. |
+| `server.clients` | Aktif bağlı tüm istemcilerin `Set<VoidSocket>` koleksiyonu. |
+| `server.broadcast(veri[, filtre])` | Veriyi yalnızca bir kez çerçeveleyip bağlı tüm istemcilere sıfır kopyalama ile yayınlar. |
+| `server.address()` | Sunucunun bağlı olduğu IP ve port bilgisini döner. |
+| `server.close([cb])` | Tüm istemcileri 1001 koduyla kapatır ve sunucuyu durdurur. |
+| `server.handleUpgrade(req, sock, head, cb)` | Özel HTTP yönlendiricilerinde el sıkışmayı manuel tamamlar. |
 
 ---
 
