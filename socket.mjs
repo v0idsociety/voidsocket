@@ -582,7 +582,7 @@ class VoidSocket {
             if (!isSrv && masked && maskReq) { this._fire(this.error, new Error('masked server frame')); this._onClose(1002); return; }
             let plen = b1 & 127, hs = 2;
             if (plen === 126) { if (L - o < 4) break; plen = (buf[o + 2] << 8) | buf[o + 3]; hs = 4; }
-            else if (plen === 127) { if (L - o < 10) break; plen = buf.readUInt32BE(o + 6); hs = 10; }
+            else if (plen === 127) { if (L - o < 10) break; if (buf.readUInt32BE(o + 2) !== 0) { this._fire(this.error, new Error('payload exceeded maxPayload')); this._onClose(1009); return; } plen = buf.readUInt32BE(o + 6); hs = 10; }
             if (this._maxPayload > 0 && plen > this._maxPayload) { this._fire(this.error, new Error('payload exceeded maxPayload')); this._onClose(1009); return; }
             if (masked) hs += 4;
             const tot = hs + plen; if (L - o < tot) break;
@@ -639,10 +639,11 @@ class VoidSocket {
 
     _parseHandshake(chunk) {
         this._pushRb(chunk);
-        const idx = this._rb.indexOf(CRLF, 0);
-        if (idx === -1 || idx >= this._rbLen) return;
+        const avail = this._rb.subarray(this._rbOff, this._rbOff + this._rbLen);
+        const idx = avail.indexOf(CRLF);
+        if (idx === -1) return;
 
-        const hdr = this._rb.toString("latin1", 0, idx);
+        const hdr = avail.toString("latin1", 0, idx);
         const tailStart = idx + 4;
         const tailLen = this._rbLen - tailStart;
 
@@ -687,7 +688,7 @@ class VoidSocket {
 
         this._fire(this.online);
 
-        const tailCopy = tailLen > 0 ? Buffer.from(this._rb.subarray(tailStart, tailStart + tailLen)) : null;
+        const tailCopy = tailLen > 0 ? Buffer.from(avail.subarray(tailStart, tailStart + tailLen)) : null;
         this._rbLen = 0;
         this._rbOff = 0;
         if (tailCopy) this._onData(tailCopy);
