@@ -12,12 +12,11 @@
     "shared.mjs",
     "socket.mjs",
     "server.mjs",
+    "lib/",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "test": "node test/test.mjs"
-  },
+  "scripts": {},
   "keywords": [
     "websocket",
     "ws",
