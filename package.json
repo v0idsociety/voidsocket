@@ -1,6 +1,6 @@
 {
   "name": "voidsocket",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "High-throughput, zero-dependency WebSocket client and server for Node.js. Built for mission-critical ingestion pipelines, broadcast engines, automated connection lifecycle, backpressure control, and zero-allocation stream parsing.",
   "type": "module",
   "main": "./index.mjs",
@@ -16,7 +16,9 @@
     "README.md",
     "LICENSE"
   ],
-  "scripts": {},
+  "scripts": {
+    "test": "node tests/test.mjs"
+  },
   "keywords": [
     "websocket",
     "ws",
